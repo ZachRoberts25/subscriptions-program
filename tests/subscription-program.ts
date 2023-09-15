@@ -24,7 +24,15 @@ interface PlanConfig {
 
 const createPlan = async (config: Partial<PlanConfig> = {}) => {
   const owner = anchor.web3.Keypair.generate();
-  const plan_account = anchor.web3.Keypair.generate();
+  const code = "test";
+  const [plan_account] = anchor.web3.PublicKey.findProgramAddressSync(
+    [
+      Buffer.from(anchor.utils.bytes.utf8.encode("plan")),
+      owner.publicKey.toBuffer(),
+      Buffer.from(anchor.utils.bytes.utf8.encode(code)),
+    ],
+    program.programId
+  );
   const airdropTx = await connection.requestAirdrop(
     owner.publicKey,
     2000000000
@@ -48,16 +56,16 @@ const createPlan = async (config: Partial<PlanConfig> = {}) => {
 
   await program.methods
     .createPlan({
-      code: "Test Plan",
+      code,
       price: new anchor.BN(10 * 10 ** decimals),
       term: { [config.term || "oneWeek"]: {} },
     })
     .accounts({
       payer: owner.publicKey,
-      planAccount: plan_account.publicKey,
+      planAccount: plan_account,
       settlementTokenAccount: ownerTokenAccount.address,
     })
-    .signers([owner, plan_account])
+    .signers([owner])
     .rpc();
 
   return {
@@ -76,7 +84,6 @@ interface CreateSubscriptionData {
 }
 
 const createSubscription = async (data: CreateSubscriptionData) => {
-  const subscription_account = anchor.web3.Keypair.generate();
   const { mint, owner, planAccount, ownerTokenAccount } = data;
   const payer = anchor.web3.Keypair.generate();
   const airdropTx = await connection.requestAirdrop(
@@ -99,7 +106,7 @@ const createSubscription = async (data: CreateSubscriptionData) => {
     owner,
     100 * 10 ** 9
   );
-  const [pda] = anchor.web3.PublicKey.findProgramAddressSync(
+  const [subscriptionAccount] = anchor.web3.PublicKey.findProgramAddressSync(
     [
       Buffer.from(anchor.utils.bytes.utf8.encode("subscription")),
       payer.publicKey.toBuffer(),
@@ -115,18 +122,16 @@ const createSubscription = async (data: CreateSubscriptionData) => {
       payer: payer.publicKey,
       payerTokenAccount: payerTokenAccount.address,
       planAccount: planAccount,
-      subscriptionAccount: subscription_account.publicKey,
-      pdaAccount: pda,
+      subscriptionAccount,
       settlementTokenAccount: ownerTokenAccount,
     })
-    .signers([payer, subscription_account])
+    .signers([payer])
     .rpc();
 
   return {
-    subscription_account,
+    subscriptionAccount,
     payer,
     payerTokenAccount,
-    pda,
   };
 };
 
@@ -134,33 +139,33 @@ describe("subscription-program", () => {
   it("Creates Plan", async () => {
     // Add your test here.
     const { plan_account, mint, owner, ownerTokenAccount } = await createPlan();
-    const data = await program.account.plan.fetch(plan_account.publicKey);
+    const data = await program.account.plan.fetch(plan_account);
+    console.log(data);
   });
 
   it("Creates a subscription", async () => {
     const { plan_account, mint, owner, ownerTokenAccount } = await createPlan();
-    const { subscription_account } = await createSubscription({
+    const { subscriptionAccount } = await createSubscription({
       owner,
       mint,
-      planAccount: plan_account.publicKey,
+      planAccount: plan_account,
       ownerTokenAccount: ownerTokenAccount.address,
     });
-    const data = await program.account.subscription.fetch(
-      subscription_account.publicKey
-    );
+    const data = await program.account.subscription.fetch(subscriptionAccount);
   });
 
   it("Fails to charge before appropriate time", async () => {
     const { plan_account, mint, owner, ownerTokenAccount } = await createPlan({
       term: "oneWeek",
     });
-    const { subscription_account, pda, payerTokenAccount } =
-      await createSubscription({
+    const { subscriptionAccount, payerTokenAccount } = await createSubscription(
+      {
         owner,
         mint,
-        planAccount: plan_account.publicKey,
+        planAccount: plan_account,
         ownerTokenAccount: ownerTokenAccount.address,
-      });
+      }
+    );
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const random = anchor.web3.Keypair.generate();
     const airdropTx = await connection.requestAirdrop(
@@ -173,9 +178,8 @@ describe("subscription-program", () => {
         .chargeSubscription()
         .accounts({
           payer: random.publicKey,
-          pdaAccount: pda,
-          planAccount: plan_account.publicKey,
-          subscriptionAccount: subscription_account.publicKey,
+          planAccount: plan_account,
+          subscriptionAccount,
           settlementTokenAccount: ownerTokenAccount.address,
           subscriberTokenAccount: payerTokenAccount.address,
         })
@@ -188,13 +192,14 @@ describe("subscription-program", () => {
     const { plan_account, mint, owner, ownerTokenAccount } = await createPlan({
       term: "oneSecond",
     });
-    const { subscription_account, pda, payerTokenAccount } =
-      await createSubscription({
+    const { subscriptionAccount, payerTokenAccount } = await createSubscription(
+      {
         owner,
         mint,
-        planAccount: plan_account.publicKey,
+        planAccount: plan_account,
         ownerTokenAccount: ownerTokenAccount.address,
-      });
+      }
+    );
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const random = anchor.web3.Keypair.generate();
     const airdropTx = await connection.requestAirdrop(
@@ -206,9 +211,8 @@ describe("subscription-program", () => {
       .chargeSubscription()
       .accounts({
         payer: random.publicKey,
-        pdaAccount: pda,
-        planAccount: plan_account.publicKey,
-        subscriptionAccount: subscription_account.publicKey,
+        planAccount: plan_account,
+        subscriptionAccount,
         settlementTokenAccount: ownerTokenAccount.address,
         subscriberTokenAccount: payerTokenAccount.address,
       })

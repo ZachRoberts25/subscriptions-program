@@ -32,7 +32,6 @@ pub mod subscription_program {
         let subscription_account = &mut ctx.accounts.subscription_account;
         let payer_token_account = &mut ctx.accounts.payer_token_account;
         let settlement_token_account = &mut ctx.accounts.settlement_token_account;
-        let pda_account = &mut ctx.accounts.pda_account;
         let payer = &mut ctx.accounts.payer;
         let token_program = &ctx.accounts.token_program;
         subscription_account.plan_account = plan_account.key();
@@ -49,7 +48,7 @@ pub mod subscription_program {
             subscription_account.next_term_date = current + 31536000;
         }
         let approve_accounts = Approve {
-            delegate: pda_account.to_account_info().clone(),
+            delegate: subscription_account.to_account_info().clone(),
             to: payer_token_account.to_account_info().clone(),
             authority: payer.to_account_info().clone(),
         };
@@ -72,7 +71,6 @@ pub mod subscription_program {
     pub fn charge_subscription(ctx: Context<ChargeSubscriptionParams>) -> Result<()> {
         let plan_account = &mut ctx.accounts.plan_account;
         let subscription_account = &mut ctx.accounts.subscription_account;
-        let pda_account = &mut ctx.accounts.pda_account;
         let settlement_token_account = &mut ctx.accounts.settlement_token_account;
         let subscriber_token_account = &mut ctx.accounts.subscriber_token_account;
 
@@ -83,7 +81,7 @@ pub mod subscription_program {
         let transfer_accounts = Transfer {
             from: subscriber_token_account.to_account_info().clone(),
             to: settlement_token_account.to_account_info().clone(),
-            authority: pda_account.to_account_info().clone(),
+            authority: subscription_account.to_account_info().clone(),
         };
 
         let (_pda, bump) = Pubkey::find_program_address(

@@ -31,9 +31,19 @@ pub struct Subscription {
 
 #[derive(Accounts)]
 pub struct CreateSubscriptionParams<'info> {
-    #[account(init, payer = payer, space =  8 + 32 + 32 + 32 + 8)]
+    #[account(
+        init, 
+        payer = payer, 
+        space =  8 + 32 + 32 + 32 + 8,
+        seeds = [b"subscription".as_ref(), payer.key().as_ref(), plan_account.key().as_ref()],
+        bump,
+    )]
     pub subscription_account: Account<'info, Subscription>,
-    #[account()]
+    #[account(
+        mut,
+        seeds = [b"plan".as_ref(), plan_account.creator.key().as_ref(), plan_account.code.as_ref()],
+        bump,
+    )]
     pub plan_account: Account<'info, Plan>,
     #[account(
         mut,
@@ -41,12 +51,6 @@ pub struct CreateSubscriptionParams<'info> {
         constraint = payer_token_account.owner == payer.key(),
     )]
     pub payer_token_account: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        seeds = [b"subscription".as_ref(), payer.key().as_ref(), plan_account.key().as_ref()],
-        bump,
-    )]
-    pub pda_account: SystemAccount<'info>,
     #[account(
         mut,
         constraint = settlement_token_account.key().as_ref() == plan_account.settlement_token_account.as_ref()
@@ -64,8 +68,15 @@ pub struct CreateSubscriptionData {
 }
 
 #[derive(Accounts)]
+#[instruction(code: String)]
 pub struct CreatePlanParams<'info> {
-    #[account(init, payer = payer, space = 8 + 36 + 84 + 32 + 32 + 8 + 32 + 11)]
+    #[account(
+        init, 
+        payer = payer, 
+        space = 8 + 36 + 84 + 32 + 32 + 8 + 32 + 11, 
+        seeds = [b"plan".as_ref(), payer.key().as_ref(), code.as_ref()],
+        bump
+    )]
     pub plan_account: Account<'info, Plan>,
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -84,16 +95,18 @@ pub struct CreatePlanData {
 
 #[derive(Accounts)]
 pub struct ChargeSubscriptionParams<'info> {
-    #[account(mut)]
-    pub subscription_account: Account<'info, Subscription>,
-    #[account()]
-    pub plan_account: Account<'info, Plan>,
     #[account(
         mut,
         seeds = [b"subscription".as_ref(), subscription_account.owner.key().as_ref(), plan_account.key().as_ref()],
         bump,
     )]
-    pub pda_account: SystemAccount<'info>,
+    pub subscription_account: Account<'info, Subscription>,
+    #[account(
+        mut,
+        seeds = [b"plan".as_ref(), plan_account.creator.key().as_ref(), plan_account.code.as_ref()],
+        bump,
+    )]
+    pub plan_account: Account<'info, Plan>,
     #[account(
         mut,
         constraint = settlement_token_account.key().as_ref() == plan_account.settlement_token_account.as_ref()
