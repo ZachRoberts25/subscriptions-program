@@ -7,6 +7,22 @@ pub use errors::SubscriptionErrors;
 
 declare_id!("6beY4Na32mmSym2oibGVBfM43B69CzrY3VQ7Uvu77LaN");
 
+pub fn term_to_seconds(term: Term) -> i64 {
+    if term == Term::OneSecond {
+        return 1;
+    } else if term == Term::ThirtySeconds {
+        return 30;
+    } else if term == Term::OneWeek {
+        return 604800;
+    } else if term == Term::ThirtyDays {
+        return 2592000;
+    } else if term == Term::OneYear {
+        return 31536000;
+    } else {
+        return 0;
+    }
+}
+
 #[program]
 pub mod subscription_program {
 
@@ -14,12 +30,11 @@ pub mod subscription_program {
 
     pub fn create_plan(ctx: Context<CreatePlanParams>, data: CreatePlanData) -> Result<()> {
         let plan_account = &mut ctx.accounts.plan_account;
-        let settlement_token_account = &mut ctx.accounts.settlement_token_account;
+        let plan_token_account = &mut ctx.accounts.plan_token_account;
         plan_account.code = data.code;
         plan_account.creator = *ctx.accounts.payer.key;
-        plan_account.settlement_token_account = settlement_token_account.key();
         plan_account.price = data.price;
-        plan_account.token_mint = settlement_token_account.mint;
+        plan_account.token_mint = plan_token_account.mint;
         plan_account.term = data.term;
         Ok(())
     }
@@ -31,22 +46,15 @@ pub mod subscription_program {
         let plan_account = &mut ctx.accounts.plan_account;
         let subscription_account = &mut ctx.accounts.subscription_account;
         let payer_token_account = &mut ctx.accounts.payer_token_account;
-        let settlement_token_account = &mut ctx.accounts.settlement_token_account;
+        let plan_token_account = &mut ctx.accounts.plan_token_account;
         let payer = &mut ctx.accounts.payer;
         let token_program = &ctx.accounts.token_program;
         subscription_account.plan_account = plan_account.key();
         subscription_account.payer_token_account = payer_token_account.key();
         subscription_account.owner = payer.key();
-        let current = Clock::get()?.unix_timestamp;
-        if plan_account.term == Term::OneWeek {
-            subscription_account.next_term_date = current + 604800;
-        } else if plan_account.term == Term::OneSecond {
-            subscription_account.next_term_date = current + 1;
-        } else if plan_account.term == Term::ThirtyDays {
-            subscription_account.next_term_date = current + 2592000;
-        } else if plan_account.term == Term::OneYear {
-            subscription_account.next_term_date = current + 31536000;
-        }
+        subscription_account.state = SubscriptionState::Active;
+        subscription_account.next_term_date =
+            Clock::get()?.unix_timestamp + term_to_seconds(plan_account.term);
         let approve_accounts = Approve {
             delegate: subscription_account.to_account_info().clone(),
             to: payer_token_account.to_account_info().clone(),
@@ -58,7 +66,7 @@ pub mod subscription_program {
         )?;
         let transfer_accounts = Transfer {
             from: payer_token_account.to_account_info().clone(),
-            to: settlement_token_account.to_account_info().clone(),
+            to: plan_token_account.to_account_info().clone(),
             authority: payer.to_account_info().clone(),
         };
         transfer(
@@ -71,16 +79,20 @@ pub mod subscription_program {
     pub fn charge_subscription(ctx: Context<ChargeSubscriptionParams>) -> Result<()> {
         let plan_account = &mut ctx.accounts.plan_account;
         let subscription_account = &mut ctx.accounts.subscription_account;
-        let settlement_token_account = &mut ctx.accounts.settlement_token_account;
+        let plan_token_account = &mut ctx.accounts.plan_token_account;
         let subscriber_token_account = &mut ctx.accounts.subscriber_token_account;
 
         let current = Clock::get()?.unix_timestamp;
         if current < subscription_account.next_term_date {
             return Err(SubscriptionErrors::SubscriptionNotReady.into());
         }
+        if subscriber_token_account.amount < plan_account.price {
+            subscription_account.state = SubscriptionState::PastDue;
+            return Ok(());
+        }
         let transfer_accounts = Transfer {
             from: subscriber_token_account.to_account_info().clone(),
-            to: settlement_token_account.to_account_info().clone(),
+            to: plan_token_account.to_account_info().clone(),
             authority: subscription_account.to_account_info().clone(),
         };
 
@@ -107,6 +119,65 @@ pub mod subscription_program {
             ),
             plan_account.price,
         )?;
+        subscription_account.next_term_date =
+            subscription_account.next_term_date + term_to_seconds(plan_account.term);
+        Ok(())
+    }
+
+    pub fn cancel_subscription(ctx: Context<CancelSubscriptionParams>) -> Result<()> {
+        // cancel will cancel the subscription but let it finish out the current term;
+        let subscription_account = &mut ctx.accounts.subscription_account;
+        subscription_account.state = SubscriptionState::PendingCancellation;
+        Ok(())
+    }
+
+    pub fn uncancel_subscription(ctx: Context<UncancelSubscriptionParams>) -> Result<()> {
+        // cancel will cancel the subscription but let it finish out the current term;
+        let subscription_account = &mut ctx.accounts.subscription_account;
+        subscription_account.state = SubscriptionState::Active;
+        Ok(())
+    }
+
+    pub fn close_subscription(ctx: Context<CloseSubscriptionParams>) -> Result<()> {
+        // close immediately, closes the subscription account and refunds the user for the remaining time;
+        let subscription_account = &mut ctx.accounts.subscription_account;
+        let plan_account = &mut ctx.accounts.plan_account;
+        let plan_token_account = &mut ctx.accounts.plan_token_account;
+        let payer_token_account = &mut ctx.accounts.payer_token_account;
+        let token_program = &ctx.accounts.token_program;
+        let current = Clock::get()?.unix_timestamp;
+        // the subscription end date is in the future so the user needs a refund for the remaining time;
+        if current < subscription_account.next_term_date {
+            let term_seconds = term_to_seconds(plan_account.term);
+            let time_diff = subscription_account.next_term_date - current;
+            let percentage = time_diff as f64 / term_seconds as f64;
+            let refund = (plan_account.price as f64 * percentage) as u64;
+            let transfer_accounts = Transfer {
+                from: plan_token_account.to_account_info().clone(),
+                to: payer_token_account.to_account_info().clone(),
+                authority: plan_account.to_account_info().clone(),
+            };
+            let plan_account_creator_key = plan_account.creator.key();
+            let seeds = &[
+                b"plan".as_ref(),
+                plan_account_creator_key.as_ref(),
+                plan_account.code.as_ref(),
+            ];
+            let (_pda, bump) = Pubkey::find_program_address(seeds, ctx.program_id);
+            transfer(
+                CpiContext::new_with_signer(
+                    token_program.to_account_info().clone(),
+                    transfer_accounts,
+                    &[&[
+                        b"plan".as_ref(),
+                        plan_account_creator_key.as_ref(),
+                        plan_account.code.as_ref(),
+                        &[bump],
+                    ]],
+                ),
+                refund,
+            )?;
+        }
         Ok(())
     }
 }

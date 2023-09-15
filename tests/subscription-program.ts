@@ -19,7 +19,7 @@ const program = anchor.workspace
 const connection = anchor.getProvider().connection;
 
 interface PlanConfig {
-  term: "oneWeek" | "oneSecond";
+  term: "oneWeek" | "oneSecond" | "thirtySeconds";
 }
 
 const createPlan = async (config: Partial<PlanConfig> = {}) => {
@@ -46,11 +46,11 @@ const createPlan = async (config: Partial<PlanConfig> = {}) => {
     null,
     decimals
   );
-  const ownerTokenAccount = await getOrCreateAssociatedTokenAccount(
+  const planTokenAccount = await getOrCreateAssociatedTokenAccount(
     connection,
     owner,
     mint,
-    owner.publicKey,
+    plan_account,
     true
   );
 
@@ -63,7 +63,7 @@ const createPlan = async (config: Partial<PlanConfig> = {}) => {
     .accounts({
       payer: owner.publicKey,
       planAccount: plan_account,
-      settlementTokenAccount: ownerTokenAccount.address,
+      planTokenAccount: planTokenAccount.address,
     })
     .signers([owner])
     .rpc();
@@ -72,7 +72,7 @@ const createPlan = async (config: Partial<PlanConfig> = {}) => {
     owner,
     plan_account,
     mint,
-    ownerTokenAccount,
+    planTokenAccount,
   };
 };
 
@@ -80,11 +80,12 @@ interface CreateSubscriptionData {
   owner: Keypair;
   mint: PublicKey;
   planAccount: PublicKey;
-  ownerTokenAccount: PublicKey;
+  planTokenAccount: PublicKey;
+  amount?: number;
 }
 
 const createSubscription = async (data: CreateSubscriptionData) => {
-  const { mint, owner, planAccount, ownerTokenAccount } = data;
+  const { mint, owner, planAccount, planTokenAccount } = data;
   const payer = anchor.web3.Keypair.generate();
   const airdropTx = await connection.requestAirdrop(
     payer.publicKey,
@@ -104,7 +105,7 @@ const createSubscription = async (data: CreateSubscriptionData) => {
     mint,
     payerTokenAccount.address,
     owner,
-    100 * 10 ** 9
+    (data.amount || 100) * 10 ** 9
   );
   const [subscriptionAccount] = anchor.web3.PublicKey.findProgramAddressSync(
     [
@@ -123,7 +124,7 @@ const createSubscription = async (data: CreateSubscriptionData) => {
       payerTokenAccount: payerTokenAccount.address,
       planAccount: planAccount,
       subscriptionAccount,
-      settlementTokenAccount: ownerTokenAccount,
+      planTokenAccount: planTokenAccount,
     })
     .signers([payer])
     .rpc();
@@ -138,24 +139,24 @@ const createSubscription = async (data: CreateSubscriptionData) => {
 describe("subscription-program", () => {
   it("Creates Plan", async () => {
     // Add your test here.
-    const { plan_account, mint, owner, ownerTokenAccount } = await createPlan();
+    const { plan_account, mint, owner, planTokenAccount } = await createPlan();
     const data = await program.account.plan.fetch(plan_account);
     console.log(data);
   });
 
   it("Creates a subscription", async () => {
-    const { plan_account, mint, owner, ownerTokenAccount } = await createPlan();
+    const { plan_account, mint, owner, planTokenAccount } = await createPlan();
     const { subscriptionAccount } = await createSubscription({
       owner,
       mint,
       planAccount: plan_account,
-      ownerTokenAccount: ownerTokenAccount.address,
+      planTokenAccount: planTokenAccount.address,
     });
     const data = await program.account.subscription.fetch(subscriptionAccount);
   });
 
   it("Fails to charge before appropriate time", async () => {
-    const { plan_account, mint, owner, ownerTokenAccount } = await createPlan({
+    const { plan_account, mint, owner, planTokenAccount } = await createPlan({
       term: "oneWeek",
     });
     const { subscriptionAccount, payerTokenAccount } = await createSubscription(
@@ -163,7 +164,7 @@ describe("subscription-program", () => {
         owner,
         mint,
         planAccount: plan_account,
-        ownerTokenAccount: ownerTokenAccount.address,
+        planTokenAccount: planTokenAccount.address,
       }
     );
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -180,7 +181,7 @@ describe("subscription-program", () => {
           payer: random.publicKey,
           planAccount: plan_account,
           subscriptionAccount,
-          settlementTokenAccount: ownerTokenAccount.address,
+          planTokenAccount: planTokenAccount.address,
           subscriberTokenAccount: payerTokenAccount.address,
         })
         .signers([random])
@@ -189,7 +190,7 @@ describe("subscription-program", () => {
   });
 
   it("Charges subscription after one second", async () => {
-    const { plan_account, mint, owner, ownerTokenAccount } = await createPlan({
+    const { plan_account, mint, owner, planTokenAccount } = await createPlan({
       term: "oneSecond",
     });
     const { subscriptionAccount, payerTokenAccount } = await createSubscription(
@@ -197,7 +198,7 @@ describe("subscription-program", () => {
         owner,
         mint,
         planAccount: plan_account,
-        ownerTokenAccount: ownerTokenAccount.address,
+        planTokenAccount: planTokenAccount.address,
       }
     );
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -213,10 +214,116 @@ describe("subscription-program", () => {
         payer: random.publicKey,
         planAccount: plan_account,
         subscriptionAccount,
-        settlementTokenAccount: ownerTokenAccount.address,
+        planTokenAccount: planTokenAccount.address,
         subscriberTokenAccount: payerTokenAccount.address,
       })
       .signers([random])
       .rpc();
+  });
+
+  it("Handles Past Due", async () => {
+    const { plan_account, mint, owner, planTokenAccount } = await createPlan({
+      term: "oneSecond",
+    });
+    const { subscriptionAccount, payerTokenAccount } = await createSubscription(
+      {
+        owner,
+        mint,
+        planAccount: plan_account,
+        planTokenAccount: planTokenAccount.address,
+        amount: 15,
+      }
+    );
+    const random = anchor.web3.Keypair.generate();
+    const airdropTx = await connection.requestAirdrop(
+      random.publicKey,
+      2000000000
+    );
+    await connection.confirmTransaction(airdropTx);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await program.methods
+      .chargeSubscription()
+      .accounts({
+        payer: random.publicKey,
+        planAccount: plan_account,
+        subscriptionAccount,
+        planTokenAccount: planTokenAccount.address,
+        subscriberTokenAccount: payerTokenAccount.address,
+      })
+      .signers([random])
+      .rpc();
+
+    const data = await program.account.subscription.fetch(subscriptionAccount);
+    expect(!!data.state.pastDue).to.eq(true);
+  });
+
+  it("Cancels & uncancels a subscription", async () => {
+    const { plan_account, mint, owner, planTokenAccount } = await createPlan();
+
+    const { subscriptionAccount, payerTokenAccount, payer } =
+      await createSubscription({
+        owner,
+        mint,
+        planAccount: plan_account,
+        planTokenAccount: planTokenAccount.address,
+      });
+
+    await program.methods
+      .cancelSubscription()
+      .accounts({
+        planAccount: plan_account,
+        payer: payer.publicKey,
+        subscriptionAccount: subscriptionAccount,
+      })
+      .signers([payer])
+      .rpc();
+    const data = await program.account.subscription.fetch(subscriptionAccount);
+    expect(!!data.state.pendingCancellation).to.eq(true);
+    await program.methods
+      .uncancelSubscription()
+      .accounts({
+        planAccount: plan_account,
+        payer: payer.publicKey,
+        subscriptionAccount: subscriptionAccount,
+      })
+      .signers([payer])
+      .rpc();
+    const data2 = await program.account.subscription.fetch(subscriptionAccount);
+    expect(!!data2.state.active).to.eq(true);
+  });
+
+  it("Closes subscription and provides refund", async () => {
+    const { plan_account, mint, owner, planTokenAccount } = await createPlan({
+      term: "thirtySeconds",
+    });
+
+    const { subscriptionAccount, payerTokenAccount, payer } =
+      await createSubscription({
+        owner,
+        mint,
+        planAccount: plan_account,
+        planTokenAccount: planTokenAccount.address,
+        amount: 100,
+      });
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    const ret = await program.methods
+      .closeSubscription()
+      .accounts({
+        planAccount: plan_account,
+        payer: payer.publicKey,
+        payerTokenAccount: payerTokenAccount.address,
+        subscriptionAccount: subscriptionAccount,
+        planTokenAccount: planTokenAccount.address,
+        subscriberTokenAccount: payerTokenAccount.address,
+      })
+      .signers([payer])
+      .rpc();
+    console.log(ret);
+    const balance = await connection.getTokenAccountBalance(
+      payerTokenAccount.address
+    );
+    // they got a refund for 5 seconds of a 30 second sub, it'll be somewhere between 90 and 100;
+    expect(balance.value.uiAmount).to.be.gt(100 - 10);
+    expect(balance.value.uiAmount).to.be.lt(100);
   });
 });
