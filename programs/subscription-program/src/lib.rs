@@ -36,6 +36,7 @@ pub mod subscription_program {
         plan_account.price = data.price;
         plan_account.token_mint = plan_token_account.mint;
         plan_account.term = data.term;
+        plan_account.active_subscriptions = 0;
         Ok(())
     }
 
@@ -55,6 +56,7 @@ pub mod subscription_program {
         subscription_account.state = SubscriptionState::Active;
         subscription_account.next_term_date =
             Clock::get()?.unix_timestamp + term_to_seconds(plan_account.term);
+        plan_account.active_subscriptions += 1;
         let approve_accounts = Approve {
             delegate: subscription_account.to_account_info().clone(),
             to: payer_token_account.to_account_info().clone(),
@@ -146,6 +148,7 @@ pub mod subscription_program {
         let payer_token_account = &mut ctx.accounts.payer_token_account;
         let token_program = &ctx.accounts.token_program;
         let current = Clock::get()?.unix_timestamp;
+        plan_account.active_subscriptions -= 1;
         // the subscription end date is in the future so the user needs a refund for the remaining time;
         if current < subscription_account.next_term_date {
             let term_seconds = term_to_seconds(plan_account.term);

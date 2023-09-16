@@ -30,6 +30,8 @@ pub struct Plan {
     pub price: u64,                       // 8
     pub token_mint: Pubkey,               // 32
     pub term: Term,                       // 1 + 10 = 11
+    pub active_subscriptions: u32,        // 4
+
 }
 
 #[account]
@@ -86,7 +88,7 @@ pub struct CreatePlanParams<'info> {
     #[account(
         init, 
         payer = payer, 
-        space = 8 + 36 + 84 + 32 + 32 + 8 + 32 + 11, 
+        space = 8 + 36 + 84 + 32 + 32 + 8 + 32 + 11 + 10, 
         seeds = [b"plan".as_ref(), payer.key().as_ref(), code.as_ref()],
         bump
     )]

@@ -322,7 +322,7 @@ describe("subscription-program", () => {
     const balance = await connection.getTokenAccountBalance(
       payerTokenAccount.address
     );
-    // they got a refund for 5 seconds of a 30 second sub, it'll be somewhere between 90 and 100;
+    // they got a refund for 5ish seconds of a 30 second sub, it'll be somewhere between 90 and 100;
     expect(balance.value.uiAmount).to.be.gt(100 - 10);
     expect(balance.value.uiAmount).to.be.lt(100);
   });
