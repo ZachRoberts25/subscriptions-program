@@ -208,6 +208,13 @@ describe("subscription-program", () => {
       2000000000
     );
     await connection.confirmTransaction(airdropTx);
+    const ownerTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      owner,
+      mint,
+      owner.publicKey,
+      true
+    );
     await program.methods
       .chargeSubscription()
       .accounts({
@@ -216,9 +223,19 @@ describe("subscription-program", () => {
         subscriptionAccount,
         planTokenAccount: planTokenAccount.address,
         subscriberTokenAccount: payerTokenAccount.address,
+        ownerTokenAccount: ownerTokenAccount.address,
       })
       .signers([random])
       .rpc();
+
+    const escrowBalance = await connection.getTokenAccountBalance(
+      planTokenAccount.address
+    );
+    expect(escrowBalance.value.uiAmount).to.eq(10);
+    const ownerBalance = await connection.getTokenAccountBalance(
+      ownerTokenAccount.address
+    );
+    expect(ownerBalance.value.uiAmount).to.eq(10);
   });
 
   it("Handles Past Due", async () => {
@@ -240,6 +257,13 @@ describe("subscription-program", () => {
       2000000000
     );
     await connection.confirmTransaction(airdropTx);
+    const ownerTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      owner,
+      mint,
+      owner.publicKey,
+      true
+    );
     await new Promise((resolve) => setTimeout(resolve, 1000));
     await program.methods
       .chargeSubscription()
@@ -249,6 +273,7 @@ describe("subscription-program", () => {
         subscriptionAccount,
         planTokenAccount: planTokenAccount.address,
         subscriberTokenAccount: payerTokenAccount.address,
+        ownerTokenAccount: ownerTokenAccount.address,
       })
       .signers([random])
       .rpc();
@@ -303,10 +328,17 @@ describe("subscription-program", () => {
         mint,
         planAccount: plan_account,
         planTokenAccount: planTokenAccount.address,
-        amount: 100,
+        amount: 20,
       });
+    const planOwnerTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      owner,
+      mint,
+      owner.publicKey,
+      true
+    );
     await new Promise((resolve) => setTimeout(resolve, 5000));
-    const ret = await program.methods
+    await program.methods
       .closeSubscription()
       .accounts({
         planAccount: plan_account,
@@ -315,15 +347,21 @@ describe("subscription-program", () => {
         subscriptionAccount: subscriptionAccount,
         planTokenAccount: planTokenAccount.address,
         subscriberTokenAccount: payerTokenAccount.address,
+        planOwnerTokenAccount: planOwnerTokenAccount.address,
       })
       .signers([payer])
       .rpc();
-    console.log(ret);
-    const balance = await connection.getTokenAccountBalance(
+    const payerBalance = await connection.getTokenAccountBalance(
       payerTokenAccount.address
     );
-    // they got a refund for 5ish seconds of a 30 second sub, it'll be somewhere between 90 and 100;
-    expect(balance.value.uiAmount).to.be.gt(100 - 10);
-    expect(balance.value.uiAmount).to.be.lt(100);
+    const ownerBalance = await connection.getTokenAccountBalance(
+      planOwnerTokenAccount.address
+    );
+    const escrowBalance = await connection.getTokenAccountBalance(
+      planTokenAccount.address
+    );
+    expect(escrowBalance.value.uiAmount).to.eq(0);
+    expect(ownerBalance.value.uiAmount + payerBalance.value.uiAmount).to.eq(20);
+    expect(payerBalance.value.uiAmount).to.be.gt(ownerBalance.value.uiAmount);
   });
 });

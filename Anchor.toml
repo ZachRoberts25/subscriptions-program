@@ -5,11 +5,18 @@ skip-lint = false
 subscription_program = "6beY4Na32mmSym2oibGVBfM43B69CzrY3VQ7Uvu77LaN"
 
 [registry]
-url = "https://api.apr.dev"
+url = "https://anchor.projectserum.com"
+
+[programs.devnet]
+subscription_program = "6beY4Na32mmSym2oibGVBfM43B69CzrY3VQ7Uvu77LaN"
+
+
+[programs.mainnet]
+subscription_program = "6beY4Na32mmSym2oibGVBfM43B69CzrY3VQ7Uvu77LaN"
 
 [provider]
 cluster = "Localnet"
-wallet = "/Users/zacharyroberts/.config/solana/id.json"
+wallet = "./deployer.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"

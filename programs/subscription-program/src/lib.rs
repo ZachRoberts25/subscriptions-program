@@ -32,7 +32,7 @@ pub mod subscription_program {
         let plan_account = &mut ctx.accounts.plan_account;
         let plan_token_account = &mut ctx.accounts.plan_token_account;
         plan_account.code = data.code;
-        plan_account.creator = *ctx.accounts.payer.key;
+        plan_account.owner = *ctx.accounts.payer.key;
         plan_account.price = data.price;
         plan_account.token_mint = plan_token_account.mint;
         plan_account.term = data.term;
@@ -83,6 +83,7 @@ pub mod subscription_program {
         let subscription_account = &mut ctx.accounts.subscription_account;
         let plan_token_account = &mut ctx.accounts.plan_token_account;
         let subscriber_token_account = &mut ctx.accounts.subscriber_token_account;
+        let owner_token_account = &ctx.accounts.owner_token_account;
 
         let current = Clock::get()?.unix_timestamp;
         if current < subscription_account.next_term_date {
@@ -98,7 +99,7 @@ pub mod subscription_program {
             authority: subscription_account.to_account_info().clone(),
         };
 
-        let (_pda, bump) = Pubkey::find_program_address(
+        let (_pda, subscription_bump) = Pubkey::find_program_address(
             &[
                 b"subscription".as_ref(),
                 subscription_account.owner.key().as_ref(),
@@ -116,13 +117,39 @@ pub mod subscription_program {
                     b"subscription".as_ref(),
                     subscription_account.owner.key().as_ref(),
                     plan_account.key().as_ref(),
-                    &[bump],
+                    &[subscription_bump],
                 ]],
             ),
             plan_account.price,
         )?;
-        subscription_account.next_term_date =
-            subscription_account.next_term_date + term_to_seconds(plan_account.term);
+        let payout_accounts = Transfer {
+            from: plan_token_account.to_account_info().clone(),
+            to: owner_token_account.to_account_info().clone(),
+            authority: plan_account.to_account_info().clone(),
+        };
+        let (_pda, plan_bump) = Pubkey::find_program_address(
+            &[
+                b"plan".as_ref(),
+                plan_account.owner.key().as_ref(),
+                plan_account.code.as_ref(),
+            ],
+            ctx.program_id,
+        );
+        // payout the owner of the plan for the previous charge on the subscription;
+        transfer(
+            CpiContext::new_with_signer(
+                cpi_program.clone(),
+                payout_accounts,
+                &[&[
+                    b"plan".as_ref(),
+                    plan_account.owner.key().as_ref(),
+                    plan_account.code.as_ref(),
+                    &[plan_bump],
+                ]],
+            ),
+            plan_account.price,
+        )?;
+        subscription_account.next_term_date += term_to_seconds(plan_account.term);
         Ok(())
     }
 
@@ -146,6 +173,7 @@ pub mod subscription_program {
         let plan_account = &mut ctx.accounts.plan_account;
         let plan_token_account = &mut ctx.accounts.plan_token_account;
         let payer_token_account = &mut ctx.accounts.payer_token_account;
+        let plan_owner_token_account = &ctx.accounts.plan_owner_token_account;
         let token_program = &ctx.accounts.token_program;
         let current = Clock::get()?.unix_timestamp;
         plan_account.active_subscriptions -= 1;
@@ -155,30 +183,49 @@ pub mod subscription_program {
             let time_diff = subscription_account.next_term_date - current;
             let percentage = time_diff as f64 / term_seconds as f64;
             let refund = (plan_account.price as f64 * percentage) as u64;
-            let transfer_accounts = Transfer {
+            let payer_payout = Transfer {
                 from: plan_token_account.to_account_info().clone(),
                 to: payer_token_account.to_account_info().clone(),
                 authority: plan_account.to_account_info().clone(),
             };
-            let plan_account_creator_key = plan_account.creator.key();
+            let plan_account_owner_key = plan_account.owner.key();
             let seeds = &[
                 b"plan".as_ref(),
-                plan_account_creator_key.as_ref(),
+                plan_account_owner_key.as_ref(),
                 plan_account.code.as_ref(),
             ];
             let (_pda, bump) = Pubkey::find_program_address(seeds, ctx.program_id);
             transfer(
                 CpiContext::new_with_signer(
                     token_program.to_account_info().clone(),
-                    transfer_accounts,
+                    payer_payout,
                     &[&[
                         b"plan".as_ref(),
-                        plan_account_creator_key.as_ref(),
+                        plan_account_owner_key.as_ref(),
                         plan_account.code.as_ref(),
                         &[bump],
                     ]],
                 ),
                 refund,
+            )?;
+
+            let owner_payout = Transfer {
+                from: plan_token_account.to_account_info().clone(),
+                to: plan_owner_token_account.to_account_info().clone(),
+                authority: plan_account.to_account_info().clone(),
+            };
+            transfer(
+                CpiContext::new_with_signer(
+                    token_program.to_account_info().clone(),
+                    owner_payout,
+                    &[&[
+                        b"plan".as_ref(),
+                        plan_account_owner_key.as_ref(),
+                        plan_account.code.as_ref(),
+                        &[bump],
+                    ]],
+                ),
+                plan_account.price - refund,
             )?;
         }
         Ok(())
