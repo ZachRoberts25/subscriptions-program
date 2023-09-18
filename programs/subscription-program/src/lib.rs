@@ -5,7 +5,7 @@ pub use state::*;
 pub mod errors;
 pub use errors::SubscriptionErrors;
 
-declare_id!("6beY4Na32mmSym2oibGVBfM43B69CzrY3VQ7Uvu77LaN");
+declare_id!("6qMvvisbUX3Co1sZa7DkyCXF8FcsTjzKSQHcaDoqSLbw");
 
 pub fn term_to_seconds(term: Term) -> i64 {
     if term == Term::OneSecond {

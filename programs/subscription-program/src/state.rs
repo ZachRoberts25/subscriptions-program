@@ -1,7 +1,5 @@
-use std::default;
-
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Token, TokenAccount};
+use anchor_spl::{token::{Token, TokenAccount, Mint}, associated_token::AssociatedToken};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Debug, PartialEq, Copy)]
 pub enum Term {
@@ -93,13 +91,18 @@ pub struct CreatePlanParams<'info> {
         bump
     )]
     pub plan_account: Account<'info, Plan>,
-    #[account(mut)]
-    pub payer: Signer<'info>,
     #[account(
-        mut,
-        constraint = plan_token_account.owner == plan_account.key(),
+        init,
+        payer = payer,
+        associated_token::mint = mint_account,
+        associated_token::authority = plan_account,
     )]
     pub plan_token_account: Account<'info, TokenAccount>,
+    #[account()]
+    pub mint_account: Account<'info, Mint>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
 }

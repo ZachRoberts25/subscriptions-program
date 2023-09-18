@@ -4,6 +4,7 @@ import { SubscriptionProgram } from "../target/types/subscription_program";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import {
   createMint,
+  getAssociatedTokenAddressSync,
   getOrCreateAssociatedTokenAccount,
   mintTo,
 } from "@solana/spl-token";
@@ -46,9 +47,7 @@ const createPlan = async (config: Partial<PlanConfig> = {}) => {
     null,
     decimals
   );
-  const planTokenAccount = await getOrCreateAssociatedTokenAccount(
-    connection,
-    owner,
+  const planTokenAccount = getAssociatedTokenAddressSync(
     mint,
     plan_account,
     true
@@ -63,7 +62,8 @@ const createPlan = async (config: Partial<PlanConfig> = {}) => {
     .accounts({
       payer: owner.publicKey,
       planAccount: plan_account,
-      planTokenAccount: planTokenAccount.address,
+      planTokenAccount: planTokenAccount,
+      mintAccount: mint,
     })
     .signers([owner])
     .rpc();
@@ -150,7 +150,7 @@ describe("subscription-program", () => {
       owner,
       mint,
       planAccount: plan_account,
-      planTokenAccount: planTokenAccount.address,
+      planTokenAccount,
     });
     const data = await program.account.subscription.fetch(subscriptionAccount);
   });
@@ -164,7 +164,7 @@ describe("subscription-program", () => {
         owner,
         mint,
         planAccount: plan_account,
-        planTokenAccount: planTokenAccount.address,
+        planTokenAccount,
       }
     );
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -181,7 +181,7 @@ describe("subscription-program", () => {
           payer: random.publicKey,
           planAccount: plan_account,
           subscriptionAccount,
-          planTokenAccount: planTokenAccount.address,
+          planTokenAccount,
           subscriberTokenAccount: payerTokenAccount.address,
         })
         .signers([random])
@@ -198,7 +198,7 @@ describe("subscription-program", () => {
         owner,
         mint,
         planAccount: plan_account,
-        planTokenAccount: planTokenAccount.address,
+        planTokenAccount,
       }
     );
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -221,7 +221,7 @@ describe("subscription-program", () => {
         payer: random.publicKey,
         planAccount: plan_account,
         subscriptionAccount,
-        planTokenAccount: planTokenAccount.address,
+        planTokenAccount,
         subscriberTokenAccount: payerTokenAccount.address,
         ownerTokenAccount: ownerTokenAccount.address,
       })
@@ -229,7 +229,7 @@ describe("subscription-program", () => {
       .rpc();
 
     const escrowBalance = await connection.getTokenAccountBalance(
-      planTokenAccount.address
+      planTokenAccount
     );
     expect(escrowBalance.value.uiAmount).to.eq(10);
     const ownerBalance = await connection.getTokenAccountBalance(
@@ -247,7 +247,7 @@ describe("subscription-program", () => {
         owner,
         mint,
         planAccount: plan_account,
-        planTokenAccount: planTokenAccount.address,
+        planTokenAccount: planTokenAccount,
         amount: 15,
       }
     );
@@ -271,7 +271,7 @@ describe("subscription-program", () => {
         payer: random.publicKey,
         planAccount: plan_account,
         subscriptionAccount,
-        planTokenAccount: planTokenAccount.address,
+        planTokenAccount: planTokenAccount,
         subscriberTokenAccount: payerTokenAccount.address,
         ownerTokenAccount: ownerTokenAccount.address,
       })
@@ -290,7 +290,7 @@ describe("subscription-program", () => {
         owner,
         mint,
         planAccount: plan_account,
-        planTokenAccount: planTokenAccount.address,
+        planTokenAccount: planTokenAccount,
       });
 
     await program.methods
@@ -327,7 +327,7 @@ describe("subscription-program", () => {
         owner,
         mint,
         planAccount: plan_account,
-        planTokenAccount: planTokenAccount.address,
+        planTokenAccount: planTokenAccount,
         amount: 20,
       });
     const planOwnerTokenAccount = await getOrCreateAssociatedTokenAccount(
@@ -345,7 +345,7 @@ describe("subscription-program", () => {
         payer: payer.publicKey,
         payerTokenAccount: payerTokenAccount.address,
         subscriptionAccount: subscriptionAccount,
-        planTokenAccount: planTokenAccount.address,
+        planTokenAccount,
         subscriberTokenAccount: payerTokenAccount.address,
         planOwnerTokenAccount: planOwnerTokenAccount.address,
       })
@@ -358,7 +358,7 @@ describe("subscription-program", () => {
       planOwnerTokenAccount.address
     );
     const escrowBalance = await connection.getTokenAccountBalance(
-      planTokenAccount.address
+      planTokenAccount
     );
     expect(escrowBalance.value.uiAmount).to.eq(0);
     expect(ownerBalance.value.uiAmount + payerBalance.value.uiAmount).to.eq(20);

@@ -2,17 +2,17 @@
 seeds = false
 skip-lint = false
 [programs.localnet]
-subscription_program = "6beY4Na32mmSym2oibGVBfM43B69CzrY3VQ7Uvu77LaN"
+subscription_program = "6qMvvisbUX3Co1sZa7DkyCXF8FcsTjzKSQHcaDoqSLbw"
 
 [registry]
 url = "https://anchor.projectserum.com"
 
 [programs.devnet]
-subscription_program = "6beY4Na32mmSym2oibGVBfM43B69CzrY3VQ7Uvu77LaN"
+subscription_program = "6qMvvisbUX3Co1sZa7DkyCXF8FcsTjzKSQHcaDoqSLbw"
 
 
 [programs.mainnet]
-subscription_program = "6beY4Na32mmSym2oibGVBfM43B69CzrY3VQ7Uvu77LaN"
+subscription_program = "6qMvvisbUX3Co1sZa7DkyCXF8FcsTjzKSQHcaDoqSLbw"
 
 [provider]
 cluster = "Localnet"
