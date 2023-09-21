@@ -83,6 +83,7 @@ pub mod subscription_program {
         let subscription_account = &mut ctx.accounts.subscription_account;
         let plan_token_account = &mut ctx.accounts.plan_token_account;
         let subscriber_token_account = &mut ctx.accounts.subscriber_token_account;
+        let deployer_token_account = &mut ctx.accounts.deployer_token_account;
         let owner_token_account = &ctx.accounts.owner_token_account;
 
         let current = Clock::get()?.unix_timestamp;
@@ -127,6 +128,7 @@ pub mod subscription_program {
             to: owner_token_account.to_account_info().clone(),
             authority: plan_account.to_account_info().clone(),
         };
+        let tax = ((plan_account.price as f32) * 0.03) as u64;
         let (_pda, plan_bump) = Pubkey::find_program_address(
             &[
                 b"plan".as_ref(),
@@ -147,7 +149,25 @@ pub mod subscription_program {
                     &[plan_bump],
                 ]],
             ),
-            plan_account.price,
+            plan_account.price - tax,
+        )?;
+        let tax_accounts = Transfer {
+            from: plan_token_account.to_account_info().clone(),
+            to: deployer_token_account.to_account_info().clone(),
+            authority: plan_account.to_account_info().clone(),
+        };
+        transfer(
+            CpiContext::new_with_signer(
+                cpi_program.clone(),
+                tax_accounts,
+                &[&[
+                    b"plan".as_ref(),
+                    plan_account.owner.key().as_ref(),
+                    plan_account.code.as_ref(),
+                    &[plan_bump],
+                ]],
+            ),
+            tax,
         )?;
         subscription_account.next_term_date += term_to_seconds(plan_account.term);
         Ok(())
@@ -174,15 +194,20 @@ pub mod subscription_program {
         let plan_token_account = &mut ctx.accounts.plan_token_account;
         let payer_token_account = &mut ctx.accounts.payer_token_account;
         let plan_owner_token_account = &ctx.accounts.plan_owner_token_account;
+        let deployer_token_account = &ctx.accounts.deployer_token_account;
         let token_program = &ctx.accounts.token_program;
         let current = Clock::get()?.unix_timestamp;
         plan_account.active_subscriptions -= 1;
         // the subscription end date is in the future so the user needs a refund for the remaining time;
         if current < subscription_account.next_term_date {
             let term_seconds = term_to_seconds(plan_account.term);
+            msg!("term seconds {}", term_seconds);
             let time_diff = subscription_account.next_term_date - current;
+            msg!("time diff {}", time_diff);
             let percentage = time_diff as f64 / term_seconds as f64;
+            msg!("percentage {}", percentage);
             let refund = (plan_account.price as f64 * percentage) as u64;
+            msg!("refund {}", refund);
             let payer_payout = Transfer {
                 from: plan_token_account.to_account_info().clone(),
                 to: payer_token_account.to_account_info().clone(),
@@ -214,6 +239,8 @@ pub mod subscription_program {
                 to: plan_owner_token_account.to_account_info().clone(),
                 authority: plan_account.to_account_info().clone(),
             };
+            let total = plan_account.price - refund;
+            let tax = ((total as f64) * 0.03) as u64;
             transfer(
                 CpiContext::new_with_signer(
                     token_program.to_account_info().clone(),
@@ -225,7 +252,26 @@ pub mod subscription_program {
                         &[bump],
                     ]],
                 ),
-                plan_account.price - refund,
+                total - tax,
+            )?;
+
+            let tax_accounts = Transfer {
+                from: plan_token_account.to_account_info().clone(),
+                to: deployer_token_account.to_account_info().clone(),
+                authority: plan_account.to_account_info().clone(),
+            };
+            transfer(
+                CpiContext::new_with_signer(
+                    token_program.to_account_info().clone(),
+                    tax_accounts,
+                    &[&[
+                        b"plan".as_ref(),
+                        plan_account_owner_key.as_ref(),
+                        plan_account.code.as_ref(),
+                        &[bump],
+                    ]],
+                ),
+                tax,
             )?;
         }
         Ok(())

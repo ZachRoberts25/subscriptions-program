@@ -10,6 +10,8 @@ import {
 } from "@solana/spl-token";
 import chai, { expect } from "chai";
 import chaiAsPromised from "chai-as-promised";
+import { readFileSync } from "fs";
+
 chai.use(chaiAsPromised);
 // Configure the client to use the local cluster.
 anchor.setProvider(anchor.AnchorProvider.env());
@@ -18,6 +20,10 @@ const program = anchor.workspace
   .SubscriptionProgram as Program<SubscriptionProgram>;
 
 const connection = anchor.getProvider().connection;
+
+const deployer = Keypair.fromSecretKey(
+  Uint8Array.from(JSON.parse(readFileSync("./deployer.json", "utf-8")))
+);
 
 interface PlanConfig {
   term: "oneWeek" | "oneSecond" | "thirtySeconds";
@@ -174,6 +180,20 @@ describe("subscription-program", () => {
       2000000000
     );
     await connection.confirmTransaction(airdropTx);
+    const deployerTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      deployer,
+      mint,
+      deployer.publicKey
+    );
+    const ownerTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      owner,
+      mint,
+      owner.publicKey,
+      true
+    );
+
     await expect(
       program.methods
         .chargeSubscription()
@@ -183,6 +203,8 @@ describe("subscription-program", () => {
           subscriptionAccount,
           planTokenAccount,
           subscriberTokenAccount: payerTokenAccount.address,
+          deployerTokenAccount: deployerTokenAccount.address,
+          ownerTokenAccount: ownerTokenAccount.address,
         })
         .signers([random])
         .rpc()
@@ -215,6 +237,17 @@ describe("subscription-program", () => {
       owner.publicKey,
       true
     );
+    const deployerAirdropTx = await connection.requestAirdrop(
+      deployer.publicKey,
+      2000000000
+    );
+    await connection.confirmTransaction(deployerAirdropTx);
+    const deployTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      deployer,
+      mint,
+      deployer.publicKey
+    );
     await program.methods
       .chargeSubscription()
       .accounts({
@@ -224,6 +257,7 @@ describe("subscription-program", () => {
         planTokenAccount,
         subscriberTokenAccount: payerTokenAccount.address,
         ownerTokenAccount: ownerTokenAccount.address,
+        deployerTokenAccount: deployTokenAccount.address,
       })
       .signers([random])
       .rpc();
@@ -235,7 +269,11 @@ describe("subscription-program", () => {
     const ownerBalance = await connection.getTokenAccountBalance(
       ownerTokenAccount.address
     );
-    expect(ownerBalance.value.uiAmount).to.eq(10);
+    expect(ownerBalance.value.uiAmount).to.eq(9.7);
+    const deployerBalance = await connection.getTokenAccountBalance(
+      deployTokenAccount.address
+    );
+    expect(deployerBalance.value.uiAmount).to.eq(0.3);
   });
 
   it("Handles Past Due", async () => {
@@ -265,6 +303,12 @@ describe("subscription-program", () => {
       true
     );
     await new Promise((resolve) => setTimeout(resolve, 1000));
+    const deployerTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      deployer,
+      mint,
+      deployer.publicKey
+    );
     await program.methods
       .chargeSubscription()
       .accounts({
@@ -274,6 +318,7 @@ describe("subscription-program", () => {
         planTokenAccount: planTokenAccount,
         subscriberTokenAccount: payerTokenAccount.address,
         ownerTokenAccount: ownerTokenAccount.address,
+        deployerTokenAccount: deployerTokenAccount.address,
       })
       .signers([random])
       .rpc();
@@ -328,7 +373,7 @@ describe("subscription-program", () => {
         mint,
         planAccount: plan_account,
         planTokenAccount: planTokenAccount,
-        amount: 20,
+        amount: 10,
       });
     const planOwnerTokenAccount = await getOrCreateAssociatedTokenAccount(
       connection,
@@ -337,8 +382,14 @@ describe("subscription-program", () => {
       owner.publicKey,
       true
     );
+    const deployerTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      deployer,
+      mint,
+      deployer.publicKey
+    );
     await new Promise((resolve) => setTimeout(resolve, 5000));
-    await program.methods
+    const ret = await program.methods
       .closeSubscription()
       .accounts({
         planAccount: plan_account,
@@ -348,6 +399,7 @@ describe("subscription-program", () => {
         planTokenAccount,
         subscriberTokenAccount: payerTokenAccount.address,
         planOwnerTokenAccount: planOwnerTokenAccount.address,
+        deployerTokenAccount: deployerTokenAccount.address,
       })
       .signers([payer])
       .rpc();
@@ -360,8 +412,14 @@ describe("subscription-program", () => {
     const escrowBalance = await connection.getTokenAccountBalance(
       planTokenAccount
     );
+    const deployerBalance = await connection.getTokenAccountBalance(
+      deployerTokenAccount.address
+    );
     expect(escrowBalance.value.uiAmount).to.eq(0);
-    expect(ownerBalance.value.uiAmount + payerBalance.value.uiAmount).to.eq(20);
+    expect(ownerBalance.value.uiAmount + payerBalance.value.uiAmount).to.eq(
+      10 - deployerBalance.value.uiAmount
+    );
     expect(payerBalance.value.uiAmount).to.be.gt(ownerBalance.value.uiAmount);
+    expect(deployerBalance.value.uiAmount).to.gt(0);
   });
 });

@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{token::{Token, TokenAccount, Mint}, associated_token::AssociatedToken};
+use solana_program::pubkey;
+
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default, Debug, PartialEq, Copy)]
 pub enum Term {
@@ -146,6 +148,12 @@ pub struct ChargeSubscriptionParams<'info> {
         constraint = owner_token_account.owner == plan_account.owner.key(),
     )]
     pub owner_token_account: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        constraint = deployer_token_account.mint == plan_account.token_mint,
+        constraint = deployer_token_account.owner == pubkey!("8mw8QFoqRffuYtwVDw4QD6eEfg1wEpYB24oL44toeZxy"),
+    )]
+    pub deployer_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -205,7 +213,7 @@ pub struct CloseSubscriptionParams<'info> {
         seeds = [b"subscription".as_ref(), subscription_account.owner.key().as_ref(), plan_account.key().as_ref()],
         constraint = subscription_account.owner == payer.key(),
         bump,
-        close = payer,
+        
     )]
     pub subscription_account: Account<'info, Subscription>,
     #[account(
@@ -238,6 +246,12 @@ pub struct CloseSubscriptionParams<'info> {
         constraint = plan_owner_token_account.owner == plan_account.owner.key(),
     )]
     pub plan_owner_token_account: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        constraint = deployer_token_account.mint == plan_account.token_mint,
+        constraint = deployer_token_account.owner == pubkey!("8mw8QFoqRffuYtwVDw4QD6eEfg1wEpYB24oL44toeZxy"),
+    )]
+    pub deployer_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
