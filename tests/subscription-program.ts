@@ -26,7 +26,7 @@ const deployer = Keypair.fromSecretKey(
 );
 
 interface PlanConfig {
-  term: "oneWeek" | "oneSecond" | "thirtySeconds";
+  termInSeconds?: number;
 }
 
 const createPlan = async (config: Partial<PlanConfig> = {}) => {
@@ -63,7 +63,7 @@ const createPlan = async (config: Partial<PlanConfig> = {}) => {
     .createPlan({
       code,
       price: new anchor.BN(10 * 10 ** decimals),
-      term: { [config.term || "oneWeek"]: {} },
+      termInSeconds: new anchor.BN(config.termInSeconds || 30),
     })
     .accounts({
       payer: owner.publicKey,
@@ -162,9 +162,7 @@ describe("subscription-program", () => {
   });
 
   it("Fails to charge before appropriate time", async () => {
-    const { plan_account, mint, owner, planTokenAccount } = await createPlan({
-      term: "oneWeek",
-    });
+    const { plan_account, mint, owner, planTokenAccount } = await createPlan();
     const { subscriptionAccount, payerTokenAccount } = await createSubscription(
       {
         owner,
@@ -213,7 +211,7 @@ describe("subscription-program", () => {
 
   it("Charges subscription after one second", async () => {
     const { plan_account, mint, owner, planTokenAccount } = await createPlan({
-      term: "oneSecond",
+      termInSeconds: 1,
     });
     const { subscriptionAccount, payerTokenAccount } = await createSubscription(
       {
@@ -278,7 +276,7 @@ describe("subscription-program", () => {
 
   it("Handles Past Due", async () => {
     const { plan_account, mint, owner, planTokenAccount } = await createPlan({
-      term: "oneSecond",
+      termInSeconds: 1,
     });
     const { subscriptionAccount, payerTokenAccount } = await createSubscription(
       {
@@ -364,7 +362,7 @@ describe("subscription-program", () => {
 
   it("Closes subscription and provides refund", async () => {
     const { plan_account, mint, owner, planTokenAccount } = await createPlan({
-      term: "thirtySeconds",
+      termInSeconds: 30,
     });
 
     const { subscriptionAccount, payerTokenAccount, payer } =
