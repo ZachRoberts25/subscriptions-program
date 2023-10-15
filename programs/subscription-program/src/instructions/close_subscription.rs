@@ -1,25 +1,21 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{ transfer, Token, TokenAccount, Transfer};
+use anchor_spl::token::{revoke, transfer, Revoke, Token, TokenAccount, Transfer};
 use solana_program::pubkey;
 
-use super::{
-    create_plan::Plan,
-    create_subscription::Subscription,
-};
-
-
+use super::{create_plan::Plan, create_subscription::Subscription};
 
 pub fn handle_close_subscription(ctx: Context<CloseSubscriptionParams>) -> Result<()> {
     // close immediately, closes the subscription account and refunds the user for the remaining time;
     let subscription_account = &mut ctx.accounts.subscription_account;
     let plan_account = &mut ctx.accounts.plan_account;
     let plan_token_account = &mut ctx.accounts.plan_token_account;
+    let payer = &ctx.accounts.payer;
     let payer_token_account = &mut ctx.accounts.payer_token_account;
     let plan_owner_token_account = &ctx.accounts.plan_owner_token_account;
     let deployer_token_account = &ctx.accounts.deployer_token_account;
     let token_program = &ctx.accounts.token_program;
     let current = Clock::get()?.unix_timestamp;
-    plan_account.active_subscriptions -= 1;
+    plan_account.active_subscriptions.checked_sub(1).or(Some(0));
     // the subscription end date is in the future so the user needs a refund for the remaining time;
     if current < subscription_account.next_term_date {
         let term_seconds = plan_account.term_in_seconds;
@@ -96,13 +92,17 @@ pub fn handle_close_subscription(ctx: Context<CloseSubscriptionParams>) -> Resul
             tax,
         )?;
     }
+
+    let revoke_accounts = Revoke {
+        authority: payer.to_account_info().clone(),
+        source: payer_token_account.to_account_info().clone(),
+    };
+    revoke(CpiContext::new(
+        token_program.to_account_info().clone(),
+        revoke_accounts,
+    ))?;
     Ok(())
 }
-
-
-
-
-
 
 #[derive(Accounts)]
 pub struct CloseSubscriptionParams<'info> {
@@ -111,7 +111,7 @@ pub struct CloseSubscriptionParams<'info> {
         seeds = [b"subscription".as_ref(), subscription_account.owner.key().as_ref(), plan_account.key().as_ref()],
         constraint = subscription_account.owner == payer.key(),
         bump,
-        
+        close = payer,
     )]
     pub subscription_account: Account<'info, Subscription>,
     #[account(
@@ -126,12 +126,6 @@ pub struct CloseSubscriptionParams<'info> {
         constraint = plan_token_account.owner == plan_account.key(),
     )]
     pub plan_token_account: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        constraint = subscriber_token_account.mint == plan_account.token_mint,
-        constraint = subscriber_token_account.owner == subscription_account.owner.key(),
-    )]
-    pub subscriber_token_account: Account<'info, TokenAccount>,
     #[account(
         mut,
         constraint = payer_token_account.mint == plan_account.token_mint,

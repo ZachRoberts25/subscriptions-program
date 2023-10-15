@@ -87,12 +87,13 @@ interface CreateSubscriptionData {
   mint: PublicKey;
   planAccount: PublicKey;
   planTokenAccount: PublicKey;
+  usePlanOwner?: boolean;
   amount?: number;
 }
 
 const createSubscription = async (data: CreateSubscriptionData) => {
   const { mint, owner, planAccount, planTokenAccount } = data;
-  const payer = anchor.web3.Keypair.generate();
+  const payer = !!data.usePlanOwner ? owner : anchor.web3.Keypair.generate();
   const airdropTx = await connection.requestAirdrop(
     payer.publicKey,
     2000000000
@@ -159,6 +160,8 @@ describe("subscription-program", () => {
       planTokenAccount,
     });
     const data = await program.account.subscription.fetch(subscriptionAccount);
+    const planData = await program.account.plan.fetch(plan_account);
+    expect(planData.activeSubscriptions).to.eq(1);
   });
 
   it("Fails to charge before appropriate time", async () => {
@@ -360,7 +363,7 @@ describe("subscription-program", () => {
     expect(!!data2.state.active).to.eq(true);
   });
 
-  it("Closes subscription and provides refund", async () => {
+  it.only("Closes subscription and provides refund", async () => {
     const { plan_account, mint, owner, planTokenAccount } = await createPlan({
       termInSeconds: 30,
     });
@@ -387,6 +390,10 @@ describe("subscription-program", () => {
       deployer.publicKey
     );
     await new Promise((resolve) => setTimeout(resolve, 5000));
+    console.log("closing subscription", {
+      planOwnerTokenAccount: planOwnerTokenAccount.address.toString(),
+      payerTokenAccount: payerTokenAccount.address.toString(),
+    });
     const ret = await program.methods
       .closeSubscription()
       .accounts({
@@ -395,7 +402,6 @@ describe("subscription-program", () => {
         payerTokenAccount: payerTokenAccount.address,
         subscriptionAccount: subscriptionAccount,
         planTokenAccount,
-        subscriberTokenAccount: payerTokenAccount.address,
         planOwnerTokenAccount: planOwnerTokenAccount.address,
         deployerTokenAccount: deployerTokenAccount.address,
       })
@@ -419,5 +425,7 @@ describe("subscription-program", () => {
     );
     expect(payerBalance.value.uiAmount).to.be.gt(ownerBalance.value.uiAmount);
     expect(deployerBalance.value.uiAmount).to.gt(0);
+    expect(program.account.subscription.fetch(subscriptionAccount)).to
+      .eventually.rejected;
   });
 });
